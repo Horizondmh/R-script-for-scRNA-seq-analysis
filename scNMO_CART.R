@@ -9,7 +9,7 @@ library(dplyr)
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
   
-  # Remove the -1 at the end of each barcode.（注意，此步骤如果标记使用不同的barcode，比如多了个-1,可以使用 tcr$barcode <- gsub("-1", "", tcr$barcode)进行提取）
+  # Remove the -1 at the end of each barcode.
   # Subsets so only the first line of each barcode is kept,
   # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]
@@ -501,7 +501,7 @@ colours <- list(
 #            "B_HC_2"="#B2C3E0","B_HC_3"="#B2C3E0","C_HC_2"="#B2C3E0","C_HC_3"="#B2C3E0"),
 #   "cycle"=c("G1"="#6131A0","G2M"="#E79D76","S"="#F2D1A8"))
 col_anno = HeatmapAnnotation(df=col_df, 
-                             which="col", # 表示 column annotations
+                             which="col",
                              col=colours, 
                              annotation_width=unit(c(1, 4), "cm"), 
                              gap=unit(1, "mm"))
@@ -570,12 +570,12 @@ library(gghalves)
 colnames(data) = c("TNFRSF17","Label")
 variable <- c("Immature B","Naive B","Non-switched memory B","Switched memory B",
               "Plasma cells/Plasmablasts","Double negative B")
-my_sort <-factor(variable,levels = variable) #排好序
+my_sort <-factor(variable,levels = variable)
 
 ggplot(data)+
   geom_half_violin(aes(as.numeric(factor(Label,levels = my_sort))+0.1,
                        TNFRSF17,fill=factor(Label,levels = my_sort)),
-                   side = 'r',cex=0.8)+  #右侧半边显示
+                   side = 'r',cex=0.8)+ 
   geom_boxplot(aes(as.numeric(factor(Label,levels = my_sort))+0.1,
                    TNFRSF17,fill=factor(Label,levels = my_sort)),
                outlier.colour="black",width=0.1,cex=0.8)+
@@ -992,7 +992,7 @@ library(DoubletFinder)
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
   
-  # Remove the -1 at the end of each barcode.（注意，此步骤如果标记使用不同的barcode，比如多了个-1,可以使用 tcr$barcode <- gsub("-1", "", tcr$barcode)进行提取）
+  # Remove the -1 at the end of each barcode.
   # Subsets so only the first line of each barcode is kept,
   # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]

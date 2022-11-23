@@ -64,7 +64,7 @@ scRNA_harmony <- ScaleData(scRNA_harmony)
 scRNA_harmony <- RunPCA(scRNA_harmony, verbose=FALSE)
 library(harmony)
 system.time({scRNA_harmony <- RunHarmony(scRNA_harmony, group.by.vars = "orig.ident")})
-#降维聚类
+
 plot1 <- DimPlot(scRNA_harmony, reduction = "pca", group.by="orig.ident")
 plot2 <- ElbowPlot(scRNA_harmony, ndims=50, reduction="pca")
 plotc <- plot1+plot2

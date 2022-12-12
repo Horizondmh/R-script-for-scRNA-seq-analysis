@@ -9,7 +9,7 @@ library(dplyr)
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
   
-  # Remove the -1 at the end of each barcode.（注意，此步骤如果标记使用不同的barcode，比如多了个-1,可以使用 tcr$barcode <- gsub("-1", "", tcr$barcode)进行提取）
+  # Remove the -1 at the end of each barcode.
   # Subsets so only the first line of each barcode is kept,
   # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]
@@ -182,7 +182,7 @@ DimPlot(scRNA_all, reduction = "umap",label=T, repel = T, group.by = "seurat_clu
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T,group.by = "tcr")
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T,group.by = "bcr")
 
-sub_018 = subset(scRNA_all, orig.ident == "B_HC_8")
+sub_018 = subset(scRNA_all, orig.ident == "B_018_pre")
 table(sub_018$label)
 # Fisher's exact test
 data = read.csv("Fisher_exact_test.csv",header = T,row.names = 1)
@@ -521,26 +521,6 @@ scRNA_B_P <- FindClusters(scRNA_B_P, reduction = "harmony", resolution = 1.5)
 # scRNA_B_P = subset(scRNA_B_P, tcr == "NA")
 #DimPlot(scRNA_B_P, label = T,reduction = "tsne")
 DimPlot(scRNA_B_P, label = T,reduction = "umap")
-
-pdf(file="markerBubble_1.pdf",width=30,height=11)
-cluster10Marker=c("CD3D","CD3E","CD4","CD8A","MKI67",
-                  "CCR7","TCF7","LEF1","SELL","CCR6","NR4A1","NCR3","KLRB1","GPR183","IL7R","CD27",
-                  "PRF1","GZMA","GZMB","GZMK","NKG7","FCGR3A","KLRG1",
-                  "ICOS","PDCD1","LAG3","HAVCR2","CD200","CTLA4","ENTPD1","ITGAE","EOMES","IRF8",
-                  "FOXP3","IL2RA","TRGV9","TRDV2",
-                  "NCAM1","KLRF1","KLRC1","CD160")#T细胞marker #https://www.jianshu.com/p/0127c9b380c9
-DotPlot(object = scRNA_B_P, features = cluster10Marker)
-dev.off()
-pdf(file="markerBubble_2.pdf",width=15,height=11)
-cluster10Marker=c("MS4A1","IGHD","NEIL1","CD27","CD38","ITGAX","TBX21","XBP1","PRDM1","IGHM","COCH","MKI67","IGHA1","IGHG1","MZB1") #http://www.360doc.com/content/12/0121/07/76149697_988292774.shtml
-DotPlot(object = scRNA_B_P, features = cluster10Marker,col.min = -1)
-dev.off()
-pdf(file="markerBubble_3.pdf",width=15,height=11)
-cluster10Marker=c("LYZ","CD14","CD83","FCGR3A","C1QA","C1QB","C1QC","CSF1R","TREM2","APOE","TYROBP","CX3CR1","SLC2A5","P2RY13","P2RY12",
-                  "CD1C","LILRA4","PF4","CD68","MARCO","FUT4","ITGAM","MME","CXCR2","SELL") #http://www.360doc.com/content/12/0121/07/76149697_988292774.shtml
-DotPlot(object = scRNA_B_P, features = cluster10Marker,col.min = -1)
-dev.off()
-
 scRNA_B_P <- FindClusters(scRNA_B_P, reduction = "harmony", resolution = 3.5)
 scRNA_B_P <- RunUMAP(scRNA_B_P, reduction = "harmony", dims = 1:25, min.dist = 2, n.neighbors = 200L)
 DimPlot(scRNA_B_P, reduction = "umap",label=T, repel = T)
@@ -799,7 +779,7 @@ library(DoubletFinder)
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
   
-  # Remove the -1 at the end of each barcode.（注意，此步骤如果标记使用不同的barcode，比如多了个-1,可以使用 tcr$barcode <- gsub("-1", "", tcr$barcode)进行提取）
+  # Remove the -1 at the end of each barcode.
   # Subsets so only the first line of each barcode is kept,
   # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]
@@ -982,7 +962,6 @@ scRNA_CAR <- ScaleData(scRNA_CAR)
 scRNA_CAR <- RunPCA(scRNA_CAR, verbose=FALSE)
 library(harmony)
 system.time({scRNA_CAR <- RunHarmony(scRNA_CAR, group.by.vars = "orig.ident")})
-#降维聚类
 plot1 <- DimPlot(scRNA_CAR, reduction = "pca", group.by="orig.ident")
 plot2 <- ElbowPlot(scRNA_CAR, ndims=50, reduction="pca")
 plotc <- plot1+plot2
@@ -1071,10 +1050,8 @@ scRNA_CAR_CD4 <- NormalizeData(scRNA_CAR_CD4)
 scRNA_CAR_CD4 <- FindVariableFeatures(scRNA_CAR_CD4)
 scRNA_CAR_CD4 <- ScaleData(scRNA_CAR_CD4)
 scRNA_CAR_CD4 <- RunPCA(scRNA_CAR_CD4, verbose=FALSE)
-##整合
 library(harmony)
 system.time({scRNA_CAR_CD4 <- RunHarmony(scRNA_CAR_CD4, group.by.vars = "orig.ident")})
-#降维聚类
 plot1 <- DimPlot(scRNA_CAR_CD4, reduction = "pca", group.by="orig.ident")
 plot2 <- ElbowPlot(scRNA_CAR_CD4, ndims=50, reduction="pca")
 plotc <- plot1+plot2

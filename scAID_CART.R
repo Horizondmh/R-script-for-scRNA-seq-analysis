@@ -118,11 +118,11 @@ scRNA_harmony@meta.data$tcr[!is.na(scRNA_harmony@meta.data$tcr)] <- "TCR"
 scRNA_harmony@meta.data$bcr = scRNA_harmony@meta.data$b_clonotype_id
 scRNA_harmony@meta.data$bcr[!is.na(scRNA_harmony@meta.data$bcr)] <- "BCR"
 DimPlot(scRNA_harmony, reduction = "umap", label=T, group.by = "bcr")
-saveRDS(scRNA_harmony, "scRNA_HC_PRE_1M_3M.rds")
+saveRDS(scRNA_harmony, "scRNA_HC_PRE.rds")
 
 
 
-scRNA_all = readRDS("scRNA_HC_PRE_1M_3M.rds")
+scRNA_all = readRDS("scRNA_HC_PRE.rds")
 scRNA_all <- FindNeighbors(scRNA_all, reduction = "harmony", dims = 1:30)
 scRNA_all <- FindClusters(scRNA_all, reduction = "harmony", resolution = 2.5)
 current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42)

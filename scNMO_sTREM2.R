@@ -362,7 +362,3 @@ DotPlot(object = scRNA_mg, features = cluster10Marker)+
   theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+
   scale_color_viridis()
 dev.off()
-sce.markers_mg = FindAllMarkers(object = scRNA_mg,
-                                only.pos = TRUE,
-                                min.pct = 0.25,
-                                logfc.threshold = 0.25)

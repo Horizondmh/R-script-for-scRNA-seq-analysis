@@ -6,42 +6,25 @@ library(Seurat)
 library(tidyselect)
 library(dplyr)
 library(DoubletFinder)
-
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
-  
-  # Remove the -1 at the end of each barcode.
-  # Subsets so only the first line of each barcode is kept,
-  # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]
-  
-  # Only keep the barcode and clonotype columns.
-  # We'll get additional clonotype info from the clonotype table.
   tcr <- tcr[,c("barcode", "raw_clonotype_id")]
   names(tcr)[names(tcr) == "raw_clonotype_id"] <- "clonotype_id"
-  
-  # Clonotype-centric info.
   clono <- read.csv(paste(tcr_prefix,"clonotypes.csv", sep=""))
-  
-  # Slap the AA sequences onto our original table by clonotype_id.
   tcr <- merge(tcr, clono[, c("clonotype_id", "cdr3s_aa")])
   names(tcr)[names(tcr) == "cdr3s_aa"] <- "cdr3s_aa"
-  
-  # Reorder so barcodes are first column and set them as rownames.
   tcr <- tcr[, c(2,1,3)]
   rownames(tcr) <- tcr[,1]
   tcr[,1] <- NULL
   colnames(tcr) <- paste(type, colnames(tcr), sep="_")
-  # Add to the Seurat object's metadata.
   clono_seurat <- AddMetaData(object=seurat_obj, metadata=tcr)
   return(clono_seurat)
 }
-
 dir1_1 = c('./data/matrix_/B_013_pre/')
 dir1_2 = c('./data/tcr_bcr_matrix/B_013_pre_TCR/')
 dir1_3 = c('./data/tcr_bcr_matrix/B_013_pre_BCR/')
 sample_name1 <- c('B_013_pre')
-
 scRNAlist <- list()
 for(i in 1:N){
   counts <- Read10X(data.dir = dir1_1[i])
@@ -60,36 +43,28 @@ for(i in 1:N){
   scRNAlist[[i]] <- RunPCA(scRNAlist[[i]], npcs = 30, verbose = FALSE)
   scRNAlist[[i]] <- RunUMAP(scRNAlist[[i]], reduction = "pca", dims = 1:30)
   scRNAlist[[i]] <- FindNeighbors(scRNAlist[[i]], reduction = "pca", dims = 1:30)
-  scRNAlist[[i]] <- FindClusters(scRNAlist[[i]], resolution = 0.5)
+  scRNAlist[[i]] <- FindClusters(scRNAlist[[i]], resolution = 0.8)
 }
-
-
 for(i in 1:N){
   table(scRNAlist[[i]]$orig.ident)
   Doubletrate = ncol(scRNAlist[[i]])*8*1e-6
-  
   sweep.res.list <- paramSweep_v3(scRNAlist[[i]], PCs = 1:30, sct = FALSE)
   sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
   bcmvn <- find.pK(sweep.stats)
   mpK<-as.numeric(as.vector(bcmvn$pK[which.max(bcmvn$BCmetric)]))
-  ## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
   annotations <- scRNAlist[[i]]@meta.data$seurat_clusters
   homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- sample14@meta.data$ClusteringResults
   nExp_poi <- round(Doubletrate*nrow(scRNAlist[[i]]@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
   nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
-  ## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
   scRNAlist[[i]] <- doubletFinder_v3(scRNAlist[[i]], PCs = 1:30, pN = 0.25, pK = mpK, nExp = nExp_poi.adj, reuse.pANN = FALSE, sct = FALSE)
-  ## save results
   scRNAlist[[i]]$doubFind_res = scRNAlist[[i]]@meta.data %>% select(contains('DF.classifications'))
   scRNAlist[[i]]$doubFind_score = scRNAlist[[i]]@meta.data %>% select(contains('pANN'))
   scRNAlist[[i]] = subset(scRNAlist[[i]], doubFind_res == "Singlet")
   table(scRNAlist[[i]]$orig.ident)
-  
   scRNAlist[[i]] <- add_clonotype(dir1_2[i], scRNAlist[[i]],"t")
   scRNAlist[[i]] <- add_clonotype(dir1_3[i], scRNAlist[[i]],"b")
   scRNAlist[[i]] <- subset(scRNAlist[[i]], cells = colnames(scRNAlist[[i]])[!(!is.na(scRNAlist[[i]]$t_clonotype_id) & !is.na(scRNAlist[[i]]$b_clonotype_id))])
 }
-
 scRNA_harmony <- merge(scRNAlist1, y = c(scRNAlist2))
 table(scRNA_harmony$orig.ident)
 scRNA_harmony <- NormalizeData(scRNA_harmony)
@@ -111,7 +86,6 @@ scRNA_harmony <- RunUMAP(scRNA_harmony, reduction = "harmony", dims = pc.num)
 #scRNA_harmony <- RunTSNE(scRNA_harmony, reduction = "harmony", dims = pc.num)
 scRNA_harmony <- FindNeighbors(scRNA_harmony, reduction = "harmony", dims = pc.num)
 scRNA_harmony <- FindClusters(scRNA_harmony, reduction = "harmony", resolution = 0.8)
-
 DimPlot(scRNA_harmony, reduction = "umap", label=T)
 #DimPlot(scRNA_harmony, reduction = "tsne", label=T)
 scRNA_harmony@meta.data$tcr = scRNA_harmony@meta.data$t_clonotype_id
@@ -121,6 +95,8 @@ scRNA_harmony@meta.data$bcr[!is.na(scRNA_harmony@meta.data$bcr)] <- "BCR"
 DimPlot(scRNA_harmony, reduction = "umap", label=T, group.by = "bcr")
 saveRDS(scRNA_harmony, "scRNA_HC_PRE_3M.rds")
 
+
+## Cell_clustering----------------------------------------------------------------------------------------------------------------------------------------------------
 pdf(file="markerBubble_1.pdf",width=30,height=11)
 cluster10Marker=c("CD3D","CD3E","CD4","CD8A","MKI67",
                   "CCR7","TCF7","LEF1","SELL","CCR6","NR4A1","NCR3","KLRB1","GPR183","IL7R","CD27",
@@ -139,7 +115,6 @@ cluster10Marker=c("LYZ","CD14","CD83","FCGR3A","C1QA","C1QB","C1QC","CSF1R","TRE
                   "CD1C","LILRA4","PF4","CD68","MARCO","FUT4","ITGAM","MME","CXCR2","SELL")
 DotPlot(object = scRNA_all, features = cluster10Marker,col.min = -1)
 dev.off()
-
 current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30)
 new.cluster.ids <- c("CD8+ T cells",
                      "CD4+ T cells",
@@ -171,29 +146,16 @@ new.cluster.ids <- c("CD8+ T cells",
                      "Unknown",
                      "Monocytes",
                      "CD8+ T cells")
-
 scRNA_all@active.ident <- plyr::mapvalues(
   x = scRNA_all@active.ident,
   from = current.cluster.ids,
   to = new.cluster.ids)
-
 scRNA_all@meta.data$label = scRNA_all@active.ident
 table(scRNA_all$orig.ident)
 scRNA_all = subset(scRNA_all, label != "Unknown")
-scRNA_all$mono_tcr = ifelse(scRNA_all$label == "Monocytes" & scRNA_all$tcr == "TCR", "DELETED", "NOT_DELETED")
-scRNA_all$mono_tcr[is.na(scRNA_all$mono_tcr)] = "NOT_DELETED"
-table(scRNA_all$mono_tcr)
-scRNA_all = subset(scRNA_all, mono_tcr == "NOT_DELETED")
-scRNA_all$mono_bcr = ifelse(scRNA_all$label == "Monocytes" & scRNA_all$bcr == "BCR", "DELETED", "NOT_DELETED")
-scRNA_all$mono_bcr[is.na(scRNA_all$mono_bcr)] = "NOT_DELETED"
-table(scRNA_all$mono_bcr)
-scRNA_all = subset(scRNA_all, mono_bcr == "NOT_DELETED")
-#scRNA_all <- RunUMAP(scRNA_all, reduction = "harmony", dims = 1:30, min.dist = 0.3, n.neighbors = 30L)
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T)
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T,group.by = "tcr")
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T,group.by = "bcr")
-
-
 scRNA_all@active.ident = factor(scRNA_all@active.ident,
                                 levels = c("CD4+ T cells","CD8+ T cells","NK cells","Proliferating cells",
                                            "B cells","Plasma cells","Monocytes"))
@@ -210,6 +172,8 @@ data = read.csv("BH_correction.csv",header = T,row.names = 1)
 data$BH =p.adjust(data$Raw.p,method = "BH")
 data$BH
 
+
+## B_cell_reclustering------------------------------------------------------------------------------------------------------------------------------------------------
 scRNA_B_P = subset(scRNA_all, label == "B cells"|label == "Plasma cells"|label == "Proliferating cells")
 scRNA_B_P = subset(scRNA_B_P, bcr == "BCR")
 pc.num = 1:30
@@ -217,15 +181,6 @@ scRNA_B_P <- RunUMAP(scRNA_B_P, reduction = "harmony", dims = pc.num)
 scRNA_B_P <- FindNeighbors(scRNA_B_P, reduction = "harmony", dims = 1:30)
 scRNA_B_P <- FindClusters(scRNA_B_P, reduction = "harmony", resolution = 1.5)
 DimPlot(scRNA_B_P, label = T,reduction = "umap")
-scRNA_B_P = subset(scRNA_B_P, seurat_clusters != "12")
-scRNA_B_P = subset(scRNA_B_P, seurat_clusters != "15")
-scRNA_B_P = subset(scRNA_B_P, seurat_clusters != "19")
-scRNA_B_P <- RunUMAP(scRNA_B_P, reduction = "harmony", dims = 1:30)
-scRNA_B_P <- FindNeighbors(scRNA_B_P, reduction = "harmony", dims = 1:30)
-scRNA_B_P <- FindClusters(scRNA_B_P, reduction = "harmony", resolution = 1.5)
-# scRNA_B_P$tcr[is.na(scRNA_B_P$tcr)] = "NA"
-# scRNA_B_P = subset(scRNA_B_P, tcr == "NA")
-#DimPlot(scRNA_B_P, label = T,reduction = "tsne")
 DimPlot(scRNA_B_P, label = T,reduction = "umap")
 dir1_3 = c('./data/tcr_bcr_matrix_2/B_HC_2_BCR/')
 bcr36 <- read.csv(paste(dir1_3[36],"filtered_contig_annotations.csv", sep=""))
@@ -428,7 +383,6 @@ piris <- ggplot(data, aes(all_gini, poly_gini)) +
   xlim(-0.2,1)+
   ylim(-0.2,1)
 ggMarginal(piris, groupFill = F)
-
 library(COSG)
 library(BuenColors)
 library(circlize)
@@ -455,7 +409,6 @@ gene = c(marker_cosg$names[,1],marker_cosg$names[,2],marker_cosg$names[,3],
          marker_cosg$names[,4],marker_cosg$names[,5],marker_cosg$names[,6])
 mat <- as.matrix(mat[gene, names(cluster_info)])
 mat = log2(mat + 1)
-
 mark_gene <- c("TCL1A","FCER2","IGHD","IGHM","TCL1A","IGHM","CCR7","FCER2","IGHD",
                "TNFRSF13B","COCH","AIM2","TNFRSF13B","XBP1","MZB1","JCHAIN","TNFRSF17","PRDM1","NXPH4")
 gene_pos <- which(rownames(mat) %in% mark_gene)
@@ -538,7 +491,6 @@ fisher.test(data,alternative = "two.sided")$p.value
 data = read.csv("BH_correction.csv",header = T,row.names = 1)
 data$BH =p.adjust(data$Raw.p,method = "BH")
 data$BH
-
 FeaturePlot(scRNA_B_P_HC_BL, features = "TNFRSF17",pt.size = 0.4)
 FeaturePlot(scRNA_B_P_HC_BL, features = "IGHG1",pt.size = 0.4)
 scRNA_B_P_HC_BL$label = scRNA_B_P_HC_BL@active.ident
@@ -547,23 +499,19 @@ col = c("#999899","#91C463","#5586AD","#9BC3DF","#FCB863","#F2D2D5")
 VlnPlot(scRNA_B_P_HC_BL, features = "TNFRSF17", group.by = "label",pt.size = 0,cols = col)
 p = VlnPlot(scRNA_B_P_HC_BL, features = "TNFRSF17", group.by = "label",pt.size = 0,cols = col)
 data = p$data
-
 scRNA_B_P_HC_BL_plasmablast = subset(scRNA_B_P_HC_BL, label == "Plasma cells/Plasmablasts")
 VlnPlot(scRNA_B_P_HC_BL_plasmablast, features = "TNFRSF17", group.by = "SampleType",pt.size = 1)
-
 scRNA_B_P_HC_BL_plasmablast = subset(scRNA_B_P_HC_BL, label == "Plasma cells/Plasmablasts")
 col = c("#98C9DD","#207CB5","#A6D38E","#37A849","#F69595","#EB2A2A","#FCBA71","#F58229","#C4C2C2")
 VlnPlot(scRNA_B_P_HC_BL_plasmablast, features = "TNFRSF17", group.by = "Isotype",pt.size = 1,cols = col)
 p = VlnPlot(scRNA_B_P_HC_BL_plasmablast, features = "TNFRSF17", group.by = "Isotype",pt.size = 0,cols = col)
 data = p$data
-
 scRNA_B_P_BL = subset(scRNA_B_P, SampleType == "BL")
 scRNA_B_P_BL_plasmablast = subset(scRNA_B_P_BL, label == "Plasma cells/Plasmablasts")
 col = c("#98C9DD","#207CB5","#A6D38E","#37A849","#F69595","#EB2A2A","#FCBA71","#F58229","#C4C2C2")
 VlnPlot(scRNA_B_P_BL_plasmablast, features = "TNFRSF17", group.by = "Isotype",pt.size = 1,cols = col)
 p = VlnPlot(scRNA_B_P_BL_plasmablast, features = "TNFRSF17", group.by = "Isotype",pt.size = 0,cols = col)
 data = p$data
-
 library(tidyverse)
 library(gghalves)
 # data = gather(data)
@@ -572,7 +520,6 @@ colnames(data) = c("TNFRSF17","Label")
 variable <- c("Immature B","Naive B","Non-switched memory B","Switched memory B",
               "Plasma cells/Plasmablasts","Double negative B")
 my_sort <-factor(variable,levels = variable)
-
 ggplot(data)+
   geom_half_violin(aes(as.numeric(factor(Label,levels = my_sort))+0.1,
                        TNFRSF17,fill=factor(Label,levels = my_sort)),
@@ -594,13 +541,11 @@ ggplot(data)+
         axis.title = element_text(size = 18),
         axis.text = element_text(color = 'black'),
         axis.text.x = element_text(face = 'italic'))
-
 sub_ppb = subset(scRNA_B_P, label == "Plasma cells/Plasmablasts")
 sub_ppb_012 = subset(sub_ppb, orig.ident == "B_014_pre")
 meta = sub_ppb_012@meta.data
 colnames(meta)
 meta2 = meta[,c(1,2,15,95)]
-
 B_012_pre = read.csv("consensus_annotations_B_014_pre.csv")
 B_012_pre = B_012_pre[B_012_pre$chain == "IGH",]
 B_012_3m = read.csv("consensus_annotations_B_014_3m.csv")
@@ -618,7 +563,6 @@ for (i in 1:nrow(merge)) {
   merge$overlap[i] = sum(a2 == b2)/nchar(a)
 }
 write.csv(merge, "overlap_for_014.csv")
-
 sub_012_pre = subset(scRNA_B_P,orig.ident == "C_017_pre")
 sub_012_pre = subset(sub_012_pre, bcr == "BCR")
 sub_012_pre$IGH = sub_012_pre$b_cdr3s_aa
@@ -639,7 +583,6 @@ for(i in 1:nrow(meta_012_pre)){
   meta_012_pre$IGH[i] = strsplit(meta_012_pre$b_cdr3s_aa[i], ";", fixed= T)[[1]][1]
 }
 head(meta_012_pre)
-
 sub_012_3m = subset(scRNA_B_P,orig.ident == "C_017_3m")
 sub_012_3m = subset(sub_012_3m, bcr == "BCR")
 sub_012_3m$IGH = sub_012_3m$b_cdr3s_aa
@@ -660,7 +603,6 @@ for(i in 1:nrow(meta_012_3m)){
   meta_012_3m$IGH[i] = strsplit(meta_012_3m$b_cdr3s_aa[i], ";", fixed= T)[[1]][1]
 }
 head(meta_012_3m)
-
 IGH_replication = intersect(meta_012_pre$IGH,meta_012_3m$IGH)
 # meta_012_pre$REP = ifelse(meta_012_pre$IGH %in% IGH_replication, "rep", "no_rep")
 # meta_012_pre_rep = meta_012_pre[meta_012_pre$REP == "rep",]
@@ -671,12 +613,9 @@ IGH_replication = intersect(meta_012_pre$IGH,meta_012_3m$IGH)
 # write.csv(meta_012_3m_norep,"meta_014_3m_norep.csv")
 write.csv(meta_012_pre,"meta_017_pre.csv")
 write.csv(meta_012_3m,"meta_017_3m.csv")
-
 # Fisher's exact test
 data = read.csv("Fisher_exact_test.csv",header = T,row.names = 1)
 fisher.test(data,alternative = "two.sided")$p.value
-
-
 library(patchwork)
 scRNA_B_P_HC_BL$SampleType = factor(scRNA_B_P_HC_BL$SampleType, levels = c("BL","HC"))
 scRNA_P = subset(scRNA_B_P_HC_BL, label == "Plasma cells/Plasmablasts")
@@ -694,11 +633,9 @@ p1 = DotPlot(object = sub_IgGplasma, features = Marker,group.by = "SampleType",c
 p2 = DotPlot(object = sub_IgAplasma, features = Marker,group.by = "SampleType",cols = c('#4676B4', '#FDCF58',"D83429"),scale.min = 0,scale.max = 40)+ theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))
 p3 = DotPlot(object = sub_IgMplasma, features = Marker,group.by = "SampleType",cols = c('#4676B4', '#FDCF58',"D83429"),scale.min = 0,scale.max = 40)+ theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))
 p1/p2/p3
-
 table(scRNA_B_P$orig.ident)
 scRNA_P = subset(scRNA_B_P, label == "Plasma cells/Plasmablasts")
 table(scRNA_P$orig.ident)
-
 SampleOrig = scRNA_B_P$SampleOrig
 SampleOrig_df = data.frame(cell = names(SampleOrig),type = SampleOrig,label = scRNA_B_P$label)
 for(i in 1:nrow(SampleOrig_df)){
@@ -710,6 +647,8 @@ scRNA_B_P@meta.data = inner_join(scRNA_B_P@meta.data,SampleOrig_df)
 rownames(scRNA_B_P@meta.data) = scRNA_B_P@meta.data$cell
 DimPlot(scRNA_B_P, group.by = "SampleClass")
 
+
+## Monocle------------------------------------------------------------------------------------------------------------------------------------------------------------
 library(monocle)
 library(tidyverse)
 library(dplyr)
@@ -728,21 +667,6 @@ test <- estimateDispersions(test)
 test <- detectGenes(test, min_expr = 0.1)
 print(head(fData(test)))
 expressed_genes = row.names(subset(fData(test),num_cells_expressed >= 10))
-
-# library(COSG)
-# marker_cosg <- cosg(
-#   scRNA_B_P,
-#   groups='all',
-#   assay='RNA',
-#   slot='data',
-#   mu=1,
-#   n_genes_user=400)
-# # marker_cosg$names
-# marker_gene = as.matrix(marker_cosg$names)
-# marker_gene_all = c(marker_gene[,1],marker_gene[,2],marker_gene[,3],marker_gene[,4],marker_gene[,5],marker_gene[,6])
-# test=setOrderingFilter(test,marker_gene_all)
-# table(test@featureData@data[["use_for_ordering"]])
-# plot_ordering_genes(test)
 Sys.time()
 diff <- differentialGeneTest(test[expressed_genes,],
                              fullModelFormulaStr = "~label")
@@ -753,10 +677,8 @@ deg = deg[order(deg$qval, decreasing = F),]
 ordergene = rownames(deg)
 test = setOrderingFilter(test, ordergene)
 #ordergene = row.names(deg)[order(deg$qval)][1:2000]
-
 test=reduceDimension(test,method = "DDRTree",max_components = 2) 
 test=orderCells(test)
-
 plot_cell_trajectory(test,color_by = "label",cell_size = 1.2)+ 
   theme(panel.border = element_rect(fill=NA,color= "black", size=1, linetype= "solid"))+ 
   scale_color_manual(breaks = c("Immature B cells","Naive B cells","Non-switched memory B cells","Switched memory B cells",
@@ -780,7 +702,6 @@ plot_cell_trajectory(test,color_by = "SampleType")+ theme(panel.border = element
 plot_cell_trajectory(test,color_by = "label")+facet_wrap(~label,nrow=1)
 plot_cell_trajectory(test, color_by = "label",cell_size = 1) +
   facet_wrap(~State, nrow = 1)
-
 plotdf = pData(test_NMO)
 plotdf = subset(plotdf,SampleType == "NMO")
 library(ggridges)
@@ -798,8 +719,7 @@ ggplot(plotdf, aes(x=Pseudotime,y=CellClass,fill=CellClass))+
 ggsave("ridgeplot_NMO.pdf",width = 23,height = 7,units = "cm")
 
 
-table(scRNA_B_P_HC_BL$SampleOrig)
-table(scRNA_B_P_HC_BL$SampleType)
+## Pathway_enrichment_analysis----------------------------------------------------------------------------------------------------------------------------------------
 scRNA_B_P_BL = subset(scRNA_B_P_HC_BL, SampleType == "BL")
 scRNA_B_BL = subset(scRNA_B_P_BL, SampleType != "Plasma cells/Plasmablasts")
 Idents(scRNA_B_BL) = "SampleOrig"
@@ -808,7 +728,6 @@ sce.markers <- FindAllMarkers(object = scRNA_B_BL,
                               min.pct = 0.25,
                               logfc.threshold = 0.25)
 write.csv(sce.markers, "sce.markers_Bcells_pbmc_csf.csv")
-
 library(GSVA)
 library(tidyverse)
 library(ggplot2)
@@ -892,7 +811,8 @@ p <- p + geom_text(data = dat_plot[1:low1,],aes(x = id,y = 0.1,label = id),
             hjust = 1,color = 'black') # 
 p
 
-#cellchat
+
+## cellchat-----------------------------------------------------------------------------------------------------------------------------------------------------------
 library(ComplexHeatmap)
 library(CellChat)
 library(ggplot2)
@@ -906,8 +826,6 @@ library(patchwork)
 Idents(scRNA_pbmc) = "label"
 scRNA_pbmc_hc = subset(scRNA_pbmc, SampleType == "HC")
 scRNA_pbmc_bl = subset(scRNA_pbmc, SampleType == "BL")
-#scRNA_csf_3m = subset(scRNA_csf_TBMG, SampleType == "3M")
-
 data.input = scRNA_pbmc_bl@assays$RNA@data
 meta = scRNA_pbmc_bl@meta.data
 unique(meta$label)
@@ -915,32 +833,23 @@ meta$label = droplevels(meta$label, exclude = setdiff(levels(meta$label),unique(
 levels(meta$label)
 cellchat <- createCellChat(object = scRNA_pbmc_bl, meta = meta, group.by = "label")
 groupSize <- as.numeric(table(cellchat@idents))
-CellChatDB <- CellChatDB.human # use CellChatDB.mouse if running on mouse data
+CellChatDB <- CellChatDB.human 
 showDatabaseCategory(CellChatDB)
-# Show the structure of the database
 dplyr::glimpse(CellChatDB$interaction)
-# use a subset of CellChatDB for cell-cell communication analysis
-# CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling")
-# use all CellChatDB for cell-cell communication analysis
-CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+CellChatDB.use <- CellChatDB
 cellchat@DB <- CellChatDB.use
-cellchat <- subsetData(cellchat) # subset the expression data of signaling genes for saving computation cost
-# future::plan("multiprocess", workers = 4) # do parallel
+cellchat <- subsetData(cellchat)
 cellchat <- identifyOverExpressedGenes(cellchat)
 cellchat <- identifyOverExpressedInteractions(cellchat)
 cellchat <- projectData(cellchat, PPI.human)
-
 cellchat <- computeCommunProb(cellchat, raw.use = TRUE)
 cellchat <- filterCommunication(cellchat, min.cells = 10)
-#df.net <- subsetCommunication(cellchat, signaling = c("WNT", "TGFb"))
 cellchat <- computeCommunProbPathway(cellchat)
 cellchat <- aggregateNet(cellchat)
-# netVisual_chord_gene(cellchat, sources.use = c(1:6), targets.use = c(1:6), slot.name = "netP", legend.pos.x = 10)#> Note: The second link end is drawn out of sector ' '.#> Note: The first link end is drawn out of sector 'MIF'.#> Note: The second link end is drawn out of sector ' '.#> Note: The first link end is drawn out of sector 'CXCL '.
 netVisual_bubble(cellchat, sources.use = c(10), targets.use = c(1:9,11), remove.isolate = FALSE)#> Comparing communications on a single object
 netVisual_bubble(cellchat, sources.use = c(1:9,11), targets.use = c(10), remove.isolate = FALSE)#
 p = netVisual_bubble(cellchat, sources.use = c(1:9,11), targets.use = c(10), remove.isolate = FALSE)#> Comparing communications on a single object
 data = p$data
-
 data.dir = './cellchat_pbmc_ppb'
 dir.create(data.dir)
 setwd(data.dir)
@@ -952,7 +861,6 @@ netVisual_bubble(cellchat, sources.use = c(1:8,11), targets.use = c(10), compari
 p = netVisual_bubble(cellchat, sources.use = c(10), targets.use = c(1:8,11), comparison = c(1,2), angle.x = 45)#> Comparing communications on a single object
 data = p$data
 write.csv(data, "data_HC_BL_ppb_all_bubbleplot.csv")
-
 scRNA_pbmc_ppb = subset(scRNA_pbmc, label == "Plasma cells")
 VlnPlot(scRNA_pbmc_ppb, features = "CD74", group.by = "SampleType")
 scRNA_pbmc_cd14 = subset(scRNA_pbmc, label == "CD4+ T cells")
@@ -984,47 +892,30 @@ chordDiagram(input,order = order,
 
 
 
-
+## QC & AddClonotypeData----------------------------------------------------------------------------------------------------------------------------------------------
 library(Seurat)
 library(tidyselect)
 library(dplyr)
 library(DoubletFinder)
-
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
-  
-  # Remove the -1 at the end of each barcode.
-  # Subsets so only the first line of each barcode is kept,
-  # as each entry for given barcode will have same clonotype.
   tcr <- tcr[!duplicated(tcr$barcode), ]
-  
-  # Only keep the barcode and clonotype columns.
-  # We'll get additional clonotype info from the clonotype table.
   tcr <- tcr[,c("barcode", "raw_clonotype_id")]
   names(tcr)[names(tcr) == "raw_clonotype_id"] <- "clonotype_id"
-  
-  # Clonotype-centric info.
   clono <- read.csv(paste(tcr_prefix,"clonotypes.csv", sep=""))
-  
-  # Slap the AA sequences onto our original table by clonotype_id.
   tcr <- merge(tcr, clono[, c("clonotype_id", "cdr3s_aa")])
   names(tcr)[names(tcr) == "cdr3s_aa"] <- "cdr3s_aa"
-  
-  # Reorder so barcodes are first column and set them as rownames.
   tcr <- tcr[, c(2,1,3)]
   rownames(tcr) <- tcr[,1]
   tcr[,1] <- NULL
   colnames(tcr) <- paste(type, colnames(tcr), sep="_")
-  # Add to the Seurat object's metadata.
   clono_seurat <- AddMetaData(object=seurat_obj, metadata=tcr)
   return(clono_seurat)
 }
-
 dir1_1 = c('./data/matrix/B_013_7d/')
 dir1_2 = c('./data/tcr_bcr_matrix/B_013_7d_TCR/')
 dir1_3 = c('./data/tcr_bcr_matrix/B_013_7d_BCR/')
 sample_name1 <- c('B_013_7d')
-
 scRNAlist <- list()
 for(i in 1:N){
   data <- Read10X(data.dir = dir1_1[i])
@@ -1045,7 +936,6 @@ for(i in 1:N){
                              nFeature_RNA>= 200  &
                              log10GenesPerUMI > 0.7)
   scRNAlist[[i]][["ADT"]] <- CreateAssayObject(data[["Antibody Capture"]][, colnames(x = scRNAlist[[i]])])
-  ## preprocessing
   DefaultAssay(scRNAlist[[i]]) <- 'ADT'
   VariableFeatures(scRNAlist[[i]]) <- rownames(scRNAlist[[i]][["ADT"]])
   scRNAlist[[i]] <- NormalizeData(scRNAlist[[i]], normalization.method = 'CLR', margin = 2) %>% 
@@ -1053,30 +943,24 @@ for(i in 1:N){
   DefaultAssay(scRNAlist[[i]]) <- 'RNA'
   scRNAlist[[i]] <- NormalizeData(scRNAlist[[i]]) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
 }
-
-for(i in 1:23){
+for(i in 1:N){
   table(scRNAlist[[i]]$orig.ident)
   Doubletrate = ncol(scRNAlist[[i]])*8*1e-6
-  
   sweep.res.list <- paramSweep_v3(scRNAlist[[i]], PCs = 1:30, sct = FALSE)
   sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
   bcmvn <- find.pK(sweep.stats)
   mpK<-as.numeric(as.vector(bcmvn$pK[which.max(bcmvn$BCmetric)]))
-  ## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
   annotations <- scRNAlist[[i]]@meta.data$seurat_clusters
   homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- sample14@meta.data$ClusteringResults
   nExp_poi <- round(Doubletrate*nrow(scRNAlist[[i]]@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
   nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
-  ## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
   scRNAlist[[i]] <- doubletFinder_v3(scRNAlist[[i]], PCs = 1:30, pN = 0.25, pK = mpK, nExp = nExp_poi.adj, reuse.pANN = FALSE, sct = FALSE)
-  ## save results
   scRNAlist[[i]]$doubFind_res = scRNAlist[[i]]@meta.data %>% select(contains('DF.classifications'))
   scRNAlist[[i]]$doubFind_score = scRNAlist[[i]]@meta.data %>% select(contains('pANN'))
   scRNAlist[[i]] = subset(scRNAlist[[i]], doubFind_res == "Singlet")
   table(scRNAlist[[i]]$orig.ident)
 }
-
-for(i in 1:23){
+for(i in 1:N){
   scRNAlist[[i]] <- add_clonotype(dir1_2[i], scRNAlist[[i]],"t")
   scRNAlist[[i]] <- add_clonotype(dir1_3[i], scRNAlist[[i]],"b")
   scRNAlist[[i]] <- subset(scRNAlist[[i]], cells = colnames(scRNAlist[[i]])[!(!is.na(scRNAlist[[i]]$t_clonotype_id) & !is.na(scRNAlist[[i]]$b_clonotype_id))])
@@ -1137,8 +1021,6 @@ p4 <- DimPlot(scRNA_harmony, reduction = 'adt.umap', label = TRUE,
 p3 + p4
 DimPlot(scRNA_harmony, reduction = "wnn.umap", label = T)
 FeaturePlot(scRNA_harmony, features = "BCMA-FITC",reduction = "wnn.umap",cols = c("lightgrey","#E5D963","#FCC40E","#FDA900","#FD7A00","#F44F1D","#FA1D0E","#FF1000","#984EA3","#772B84","#FA1D0E","#FA1D0E"))
-
-##UMAP图
 scRNA_harmony <- FindMultiModalNeighbors(scRNA_harmony,
                                          reduction.list = list("pca", "apca"),
                                          dims.list = list(1:50, 1:4),
@@ -1148,144 +1030,303 @@ scRNA_harmony <- FindClusters(scRNA_harmony, graph.name = "wsnn", algorithm = 3,
 DimPlot(scRNA_harmony, reduction = "wnn.umap", label = T)
 
 
+## Cell_clustering----------------------------------------------------------------------------------------------------------------------------------------------------
+DefaultAssay(scRNA_CAR) <- 'RNA'
+pdf(file="markerBubble_1.pdf",width=30,height=11)
+cluster10Marker=c("CD3D","CD3E","CD4","CD8A","MKI67",
+                  "CCR7","TCF7","LEF1","SELL","CCR6","NR4A1","NCR3","KLRB1","GPR183","IL7R","CD27",
+                  "PRF1","GZMA","GZMB","GZMK","NKG7","FCGR3A","KLRG1",
+                  "ICOS","PDCD1","LAG3","HAVCR2","CD200","CTLA4","ENTPD1","ITGAE","EOMES","IRF8",
+                  "FOXP3","IL2RA","TRGV9","TRDV2",
+                  "NCAM1","KLRF1","KLRC1","CD160","CT103A-CAR")#T细胞marker #https://www.jianshu.com/p/0127c9b380c9
+DotPlot(object = scRNA_CAR, features = cluster10Marker)
+dev.off()
+pdf(file="markerBubble_2.pdf",width=15,height=11)
+cluster10Marker=c("MS4A1","IGHD","NEIL1","CD27","CD38","ITGAX","TBX21","XBP1","PRDM1","IGHM","COCH","MKI67","IGHA1","IGHG1","MZB1") #http://www.360doc.com/content/12/0121/07/76149697_988292774.shtml
+DotPlot(object = scRNA_CAR, features = cluster10Marker,col.min = -1)
+dev.off()
+pdf(file="markerBubble_3.pdf",width=15,height=11)
+cluster10Marker=c("LYZ","CD14","CD83","FCGR3A","C1QA","C1QB","C1QC","CSF1R","TREM2","APOE","TYROBP","CX3CR1","SLC2A5","P2RY13","P2RY12",
+                  "CD1C","LILRA4","PF4","CD68","MARCO","FUT4","ITGAM","MME","CXCR2","SELL") #http://www.360doc.com/content/12/0121/07/76149697_988292774.shtml
+DotPlot(object = scRNA_CAR, features = cluster10Marker,col.min = -1)
+dev.off()
+DefaultAssay(scRNA_CAR) <- 'ADT'
+pdf(file="markerBubble_4.pdf",width=15,height=11)
+cluster10Marker=c("CD4","CD8A","BCMA-FITC","BCMA") #http://www.360doc.com/content/12/0121/07/76149697_988292774.shtml
+DotPlot(object = scRNA_CAR, features = cluster10Marker,col.min = -1)
+dev.off()
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26)
+new.cluster.ids <- c("CD4+ T",
+                     "CD4+ T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "CD4/CD8 T",
+                     "CD4+ T",
+                     "CD4+ T",
+                     "CD4+ T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "CD4+ T",
+                     "CD8+ T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "Unknown",
+                     "CD8+ T",
+                     "CD4/CD8 T",
+                     "CD8+ T",
+                     "CD4+ T",
+                     "Unknown",
+                     "CD4/CD8 T",
+                     "CD8+ T",
+                     "CD4/CD8 T")
+scRNA_CAR@active.ident <- plyr::mapvalues(
+  x = scRNA_CAR@active.ident,
+  from = current.cluster.ids,
+  to = new.cluster.ids)
+scRNA_CAR@meta.data$label = scRNA_CAR@active.ident
+scRNA_CAR = subset(scRNA_CAR, label != "Unknown")
+DimPlot(scRNA_CAR,reduction = "wnn.umap",label = T, cols = c("#A6D38E","#FCBA71","#C0C0C0"))
+scRNA_CAR$label = factor(scRNA_CAR$label,levels = c("CD4+ T","CD8+ T","CD4/CD8 T"))
 
-Idents(scRNA_all) = "seurat_clusters"
-scRNA_csf = subset(scRNA_all, SampleOrig == "csf")
-scRNA_csf_HC_BL = subset(scRNA_csf, SampleType != "3M")
-scRNA_csf_HC_BL@active.ident = factor(scRNA_csf_HC_BL@active.ident, 
-                         levels = c("CD4+ T cells","CD8+ T cells","NK cells","Proliferating cells","B cells","Plasma cells",
-                                    "CD14+ monocytes","CD16+ monocytes","Macrophages","cDCs","pDCs"))
-col = c("#E3C13E","#99CC99","#4D9994","#578058","#6D319D","#EA9650","#C4DCE2","#577F54","#9D0068","#3A6A89","#AA9BC5")
+
+## CD4_CART_reclustering----------------------------------------------------------------------------------------------------------------------------------------------
+scRNA_CAR_CD4 = subset(scRNA_CAR, label == "CD4+ T" | label == "CD4/CD8 T")
+DefaultAssay(scRNA_CAR_CD4) = "RNA"
+scRNA_CAR_CD4 <- NormalizeData(scRNA_CAR_CD4)
+scRNA_CAR_CD4 <- FindVariableFeatures(scRNA_CAR_CD4)
+scRNA_CAR_CD4 <- ScaleData(scRNA_CAR_CD4)
+scRNA_CAR_CD4 <- RunPCA(scRNA_CAR_CD4, verbose=FALSE)
+library(harmony)
+system.time({scRNA_CAR_CD4 <- RunHarmony(scRNA_CAR_CD4, group.by.vars = "orig.ident")})
+plot1 <- DimPlot(scRNA_CAR_CD4, reduction = "pca", group.by="orig.ident")
+plot2 <- ElbowPlot(scRNA_CAR_CD4, ndims=50, reduction="pca")
+plotc <- plot1+plot2
+plotc
+pc.num = 1:30
+scRNA_CAR_CD4 <- RunUMAP(scRNA_CAR_CD4, reduction = "harmony", dims = pc.num)
+scRNA_CAR_CD4 <- FindNeighbors(scRNA_CAR_CD4, reduction = "harmony", dims = pc.num)
+scRNA_CAR_CD4 <- FindClusters(scRNA_CAR_CD4, reduction = "harmony", resolution = 0.5)
+scRNA_CAR_CD4 <- FindClusters(scRNA_CAR_CD4, reduction = "harmony", resolution = 1)
+DimPlot(scRNA_CAR_CD4, reduction = "umap", label=T)
+saveRDS(scRNA_CAR_CD4,"scRNA_IP_PBMC_CITESEQ_CAR_CD4_0804.rds")
+pdf(file="markerBubble_1.pdf",width=30,height=11)
+cluster10Marker=c("CD3D","CD3E","CD4","CD8A","MKI67",
+                  "CCR7","TCF7","LEF1","SELL","CCR6","NR4A1","NCR3","KLRB1","GPR183","IL7R","CD27",
+                  "PRF1","GZMA","GZMB","GZMK","NKG7","FCGR3A","KLRG1",
+                  "ICOS","PDCD1","LAG3","HAVCR2","CD200","CTLA4","ENTPD1","ITGAE","EOMES","IRF8",
+                  "FOXP3","IL2RA","TRGV9","TRDV2",
+                  "NCAM1","KLRF1","KLRC1","CD160","CT103A-CAR")
+DotPlot(object = scRNA_CAR_CD4, features = cluster10Marker)
+dev.off()
+pdf(file="markerBubble_2.pdf",width=15,height=11)
+cluster10Marker=c("MS4A1","IGHD","NEIL1","CD27","CD38","ITGAX","TBX21","XBP1","PRDM1","IGHM","COCH","MKI67","IGHA1","IGHG1","MZB1")
+DotPlot(object = scRNA_CAR_CD4, features = cluster10Marker,col.min = -1)
+dev.off()
+pdf(file="markerBubble_3.pdf",width=15,height=11)
+cluster10Marker=c("LYZ","CD14","CD83","FCGR3A","C1QA","C1QB","C1QC","CSF1R","TREM2","APOE","TYROBP","CX3CR1","SLC2A5","P2RY13","P2RY12",
+                  "CD1C","LILRA4","PF4","CD68","MARCO","FUT4","ITGAM","MME","CXCR2","SELL")
+DotPlot(object = scRNA_CAR_CD4, features = cluster10Marker,col.min = -1)
+dev.off()
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)
+new.cluster.ids <- c("CD4+ Tem",
+                     "Proliferating T cells",
+                     "CD4+ Tcm",
+                     "Proliferating T cells",
+                     "CD4+ Tcm",
+                     "CD4+ Tn",
+                     "Proliferating T cells",
+                     "CD4+ Tem",
+                     "CD4+ Tem",
+                     "Proliferating T cells",
+                     "Unknown",
+                     "Proliferating T cells",
+                     "Treg",
+                     "CD4+ Tem",
+                     "Unknown",
+                     "Proliferating T cells",
+                     "CD4+ Tn",
+                     "CD4+ Tem",
+                     "Proliferating T cells")
+scRNA_CAR_CD4@active.ident <- plyr::mapvalues(
+  x = scRNA_CAR_CD4@active.ident,
+  from = current.cluster.ids,
+  to = new.cluster.ids)
+scRNA_CAR_CD4@meta.data$label = scRNA_CAR_CD4@active.ident
+scRNA_CAR_CD4 = subset(scRNA_CAR_CD4, label != "Unknown")
+DimPlot(scRNA_CAR_CD4, reduction = "umap", label=T)
+scRNA_CAR_CD4@active.ident = factor(scRNA_CAR_CD4@active.ident, levels = c("CD4+ Tn","CD4+ Tcm","CD4+ Tem","Treg","Proliferating T cells"))
+scRNA_CAR_CD4@meta.data$label = scRNA_CAR_CD4@active.ident
+DimPlot(scRNA_CAR_CD4, reduction = "umap", label=T,group.by = "label",cols = c("#AA90AA","#AACDC5","#7EB793","#3383BC","#FCB863"))+NoLegend()
+scRNA_CAR_CD4$SampleType = factor(scRNA_CAR_CD4$SampleType, levels = c("IP","7D","14D","21D","28D"))
+col = c("#A4C8DB","#166BA0","#ABCE86","#4EA74C","#984EA3")
+DimPlot(scRNA_CAR_CD4, label = T, reduction = "umap", group.by = "SampleType",cols = col)+NoLegend()
+scRNA_CAR_CD4$SampleType2 = ifelse(scRNA_CAR_CD4$SampleType == "IP", "IP",
+                                   ifelse(scRNA_CAR_CD4$SampleType == "7D"|scRNA_CAR_CD4$SampleType == "14D","Early","Late"))
+scRNA_CAR_CD4$SampleType2 = factor(scRNA_CAR_CD4$SampleType2, levels = c("IP","Early","Late"))
+sub_012 = subset(scRNA_CAR_CD4, orig.ident == "B_017_28d")
+table(sub_012$label)
 library(ggplot2)
-DimPlot(scRNA_csf_HC_BL, reduction = "umap",label=T, repel = T, cols = col,raster=FALSE)+
-  NoLegend()+labs(x = "UMAP_1", y = "UMAP_2")+
-  theme(axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.text.y = element_blank(),
-        axis.ticks.y = element_blank())+
-  theme(panel.border = element_rect(fill=NA,color= "black", size=1, linetype= "solid"))
-
+FeaturePlot(scRNA_CAR_CD4, features = "CD27", reduction = "umap", cols = c("#BFBEBE","#7F69AF","#5165B1"))+NoLegend()
 library(viridis)
 library(ggplot2)
-pdf(file="markerBubble_csf.pdf",width=9,height=4)
-cluster10Marker=c("CD3G","CD4","CD8A","KLRC1","MKI67","MS4A1","MZB1","S100A8","CD14","FCGR3A","LYVE1","MRC1",
-                  "TREM2","APOE","CD1C","LILRA4")
-DotPlot(object = scRNA_csf_HC_BL, features = cluster10Marker)+ 
+pdf(file="markerBubble_CD4CAR.pdf",width=9,height=2.5)
+cluster10Marker=c("CCR7","TCF7","LEF1","IL7R","CD27","SELL","CD44","FOXP3","IL2RA","MKI67")
+DotPlot(object = scRNA_CAR_CD4, features = cluster10Marker)+ 
   theme(panel.border = element_rect(fill=NA,color= "black", size=1, linetype= "solid"))+ 
   theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+
   scale_color_viridis()
 dev.off()
-
-#cellchat
-library(ComplexHeatmap)
-library(CellChat)
-library(ggplot2)
-library(ggalluvial)
-library(svglite)
-library(Seurat)
-library(NMF)
-library(reticulate)
-library(umapr)
-library(patchwork)
-Idents(scRNA_csf) = "label"
-scRNA_csf_hc = subset(scRNA_csf, SampleType == "HC")
-scRNA_csf_bl = subset(scRNA_csf, SampleType == "BL")
-#scRNA_csf_3m = subset(scRNA_csf_TBMG, SampleType == "3M")
-
-data.input = scRNA_csf_bl@assays$RNA@data
-meta = scRNA_csf_bl@meta.data
-unique(meta$label)
-meta$label = droplevels(meta$label, exclude = setdiff(levels(meta$label),unique(meta$label)))
-levels(meta$label)
-cellchat <- createCellChat(object = scRNA_csf_bl, meta = meta, group.by = "label")
-groupSize <- as.numeric(table(cellchat@idents))
-CellChatDB <- CellChatDB.human # use CellChatDB.mouse if running on mouse data
-showDatabaseCategory(CellChatDB)
-# Show the structure of the database
-dplyr::glimpse(CellChatDB$interaction)
-# use a subset of CellChatDB for cell-cell communication analysis
-# CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling")
-# use all CellChatDB for cell-cell communication analysis
-CellChatDB.use <- CellChatDB # simply use the default CellChatDB
-cellchat@DB <- CellChatDB.use
-cellchat <- subsetData(cellchat) # subset the expression data of signaling genes for saving computation cost
-# future::plan("multiprocess", workers = 4) # do parallel
-cellchat <- identifyOverExpressedGenes(cellchat)
-cellchat <- identifyOverExpressedInteractions(cellchat)
-cellchat <- projectData(cellchat, PPI.human)
-cellchat <- computeCommunProb(cellchat, raw.use = TRUE)
-cellchat <- filterCommunication(cellchat, min.cells = 10)
-#df.net <- subsetCommunication(cellchat, signaling = c("WNT", "TGFb"))
-cellchat <- computeCommunProbPathway(cellchat)
-cellchat <- aggregateNet(cellchat)
-netVisual_bubble(cellchat, sources.use = c(10), targets.use = c(1:9,11), remove.isolate = FALSE)#> Comparing communications on a single object
-netVisual_bubble(cellchat, sources.use = c(1:9,11), targets.use = c(10), remove.isolate = FALSE)#
-p = netVisual_bubble(cellchat, sources.use = c(1:9,11), targets.use = c(10), remove.isolate = FALSE)#> Comparing communications on a single object
-data = p$data
-write.csv(data, "data_BL_bubbleplot.csv")
-saveRDS(cellchat, "cellchat_BL.rds")
-cellchat = readRDS("cellchat_BL.rds")
-data.dir = './cellchat_HC_BL_csf_comparison'
-dir.create(data.dir)
-setwd(data.dir)
-cellchat.HC = readRDS("cellchat_HC.rds")
-cellchat.BL = readRDS("cellchat_BL.rds")
-object.list = list(HC = cellchat.HC, BL = cellchat.BL)
-cellchat = mergeCellChat(object.list, add.names = names(object.list))
-netVisual_bubble(cellchat, sources.use = c(1:6), targets.use = c(1:6), comparison = c(1,2), angle.x = 45)#> Comparing communications on a single object
-p = netVisual_bubble(cellchat, sources.use = c(1:6), targets.use = c(1:6), comparison = c(1,2), angle.x = 45)#> Comparing communications on a single object
-data = p$data
-write.csv(data, "data_HC_BL_bubbleplot.csv")
-
-scRNA_csf_ppb = subset(scRNA_csf, label == "Plasma cells")
-VlnPlot(scRNA_csf_ppb, features = "CD74", group.by = "SampleType")
-scRNA_csf_cd14 = subset(scRNA_csf, label == "Macrophages")
-VlnPlot(scRNA_csf_cd14, features = "CCR1", group.by = "SampleType")
-
-input = read.csv("data_netVisual_chord.csv", header = T)
-input$source_short = substr(input$source, 1,4)
-input$ligand = paste("L", input$ligand, sep = "_")
-input$ligand = paste(input$source_short, input$ligand, sep = "_")
-
-input$target_short = substr(input$target, 1,4)
-input$receptor = paste("T", input$receptor, sep = "_")
-input$receptor = paste(input$target_short, input$receptor, sep = "_")
-
-input = input[,c(3,4,5)]
-write.csv(input, "input.csv")
+library(dplyr)
+colnames(scRNA_CAR_CD4@meta.data)
+sub_1 = subset(scRNA_CAR_CD4,orig.ident == "B_013_7d")
+b = sub_1@meta.data[,c(12,88)]
+b = na.omit(b)
+duplicate_name = b %>% group_by(t_clonotype_id) %>% summarise(freq = n()) %>% filter(freq > 1) %>% select(t_clonotype_id)
+duplicate_data = b[b$t_clonotype_id %in% duplicate_name$t_clonotype_id, ]
+non_duplicate_data = b[!b$t_clonotype_id %in% duplicate_name$t_clonotype_id, ]
+table(non_duplicate_data$label)
+table(duplicate_data$label)
+library(COSG)
+library(BuenColors)
 library(circlize)
-library(reshape2)
-input = read.csv("input.csv")
-order = read.csv("order.csv")
-order = order[,1]
-chordDiagram(input,order = order,
-             col = c(rep("#8CACC4",8),rep("#001E3F",2),
-                     rep("#8CACC4",0),rep("#001E3F",2),
-                     rep("#8CACC4",0),rep("#001E3F",1),
-                     rep("#8CACC4",0),rep("#001E3F",2),
-                     rep("#8CACC4",0),rep("#001E3F",1),
-                     rep("#8CACC4",0),rep("#001E3F",1),
-                     rep("#8CACC4",2),rep("#001E3F",1)),
-             annotationTrack = c("name", "grid"))
-
-
-DefaultAssay(scRNA_csf_HC_BL) <- "RNA"
+library(ComplexHeatmap)
+Idents(scRNA_CAR_CD4) = "SampleType2"
+table(scRNA_CAR_CD4$SampleType2)
+scRNA_CAR_CD4 = NormalizeData(scRNA_CAR_CD4)
+all.genes = rownames(scRNA_CAR_CD4)
+scRNA_CAR_CD4 = ScaleData(scRNA_CAR_CD4, features = all.genes)
+mat <- GetAssayData(scRNA_CAR_CD4, slot = "scale.data")
+cluster_info <- sort(scRNA_CAR_CD4$SampleType2)
+# gene = c(marker_cosg$names[,1][1:30],marker_cosg$names[,2],marker_cosg$names[,3])
+gene = read.csv("CD4.csv")
+gene = gene$Gene
+mat <- as.matrix(mat[gene, names(cluster_info)])
+scRNA_CAR_CD4$Patient = ifelse(scRNA_CAR_CD4$orig.ident == "CT103A_013"|scRNA_CAR_CD4$orig.ident == "B_013_7d"|scRNA_CAR_CD4$orig.ident == "B_013_14d"|scRNA_CAR_CD4$orig.ident == "B_013_21d"|scRNA_CAR_CD4$orig.ident == "B_013_28d","NMO_013",
+                               ifelse(scRNA_CAR_CD4$orig.ident == "CT103A_014"|scRNA_CAR_CD4$orig.ident == "B_014_7d"|scRNA_CAR_CD4$orig.ident == "B_014_14d"|scRNA_CAR_CD4$orig.ident == "B_014_21d"|scRNA_CAR_CD4$orig.ident == "B_014_28d","NMO_014",
+                                      ifelse(scRNA_CAR_CD4$orig.ident == "CT103A_015"|scRNA_CAR_CD4$orig.ident == "B_015_7d"|scRNA_CAR_CD4$orig.ident == "B_015_14d"|scRNA_CAR_CD4$orig.ident == "B_015_21d"|scRNA_CAR_CD4$orig.ident == "B_015_28d","NMO_015",
+                                             ifelse(scRNA_CAR_CD4$orig.ident == "CT103A_016"|scRNA_CAR_CD4$orig.ident == "B_016_7d"|scRNA_CAR_CD4$orig.ident == "B_016_14d"|scRNA_CAR_CD4$orig.ident == "B_016_21d"|scRNA_CAR_CD4$orig.ident == "B_016_28d","NMO_016","NMO_017"))))
+Patient_info = scRNA_CAR_CD4$Patient
+Patient_df = data.frame(cell = names(Patient_info),Patient = Patient_info)
+cluster_df = data.frame(cell = names(cluster_info),cluster = cluster_info)
+col_df = inner_join(cluster_df, Patient_df)
+rownames(col_df) = col_df$cell
+col_df = col_df[,-1]
+table(col_df$cluster)
+table(col_df$Patient)
+# colours <- list(
+#   "cluster"=c("IP"="#A4C8DB",
+#               "7D"="#166BA0",
+#               "14D"="#ABCE86",
+#               "21D"="#4EA74C",
+#               "28D"="#984EA3"),
+#   "Patient"=c("NMO_012"="#DAB8DA","NMO_013"="#9BC3DF","NMO_014"="#789CBF",
+#               "NMO_015"="#B9B9B9","NMO_016"="#7EB793","NMO_017"="#F3754E"))
+colours <- list(
+  "cluster"=c("IP"="#A4C8DB",
+              "Early"="#166BA0",
+              "Late"="#ABCE86"),
+  "Patient"=c("NMO_013"="#9BC3DF","NMO_014"="#789CBF",
+              "NMO_015"="#B9B9B9","NMO_016"="#7EB793","NMO_017"="#F3754E"))
+col_anno = HeatmapAnnotation(df=col_df, 
+                             which="col", # 表示 column annotations
+                             col=colours, 
+                             annotation_width=unit(c(1, 4), "cm"), 
+                             gap=unit(1, "mm"))
+col_heatmap = colorRamp2(c(-2,0,2),c("#417D8B","white","#BB3E45"))
+Heatmap(mat,
+        cluster_rows = FALSE,
+        cluster_columns = FALSE,
+        show_column_names = FALSE,
+        show_row_names = FALSE,
+        # right_annotation = row_anno,
+        top_annotation = col_anno,
+        #column_split = cluster_info,
+        col = col_heatmap,
+        column_title = NULL,
+        use_raster = F)
+clonotype = scRNA_CAR_CD4$t_clonotype_id
+clonotype_df = data.frame(cell = names(clonotype),type = clonotype,orig.ident = scRNA_CAR_CD4$orig.ident)
+clonotype_df = na.omit(clonotype_df)
+for(i in 1:nrow(clonotype_df)){
+  clonotype_df$type[i] = paste(clonotype_df$orig.ident[i],clonotype_df$type[i])
+}
+celltype = scRNA_CAR_CD4$label
+celltype_df = data.frame(cell = names(celltype),celltype = celltype)
+celltype_clonotype_df = merge(clonotype_df,celltype_df,all.y = T)
+clononumber_df = data.frame(type = names(table(celltype_clonotype_df$type)),clononumber = table(celltype_clonotype_df$type))
+clononumber_df = clononumber_df[,-2]
+colnames(clononumber_df) = c("type","clononumber")
+celltype_clonotype_clononumber_df = merge(celltype_clonotype_df,clononumber_df,by = "type",all.x = T)
+celltype_clonotype_clononumber_df$clonostate = ifelse(celltype_clonotype_clononumber_df$clononumber >= 5, ">5","<5")
+scRNA_CAR_CD4@meta.data$cell = rownames(scRNA_CAR_CD4@meta.data)
+clononumber_df = celltype_clonotype_clononumber_df[,c(2,5)]
+clononumber_df[,2] = as.numeric(clononumber_df[,2])
+#scRNA_CAR_CD4@meta.data = merge(scRNA_CAR_CD4@meta.data,clononumber_df,by = "cell",all.x = T)
+scRNA_CAR_CD4@meta.data = inner_join(scRNA_CAR_CD4@meta.data,clononumber_df)
+clonostate_df = celltype_clonotype_clononumber_df[,c(2,6)]
+#scRNA_CAR_CD4@meta.data = merge(scRNA_CAR_CD4@meta.data,clonostate_df,by = "cell",all.x = T)
+scRNA_CAR_CD4@meta.data = inner_join(scRNA_CAR_CD4@meta.data,clonostate_df)
+rownames(scRNA_CAR_CD4@meta.data) = scRNA_CAR_CD4@meta.data$cell
+library(ggplot2)
+DimPlot(scRNA_CAR_CD4, reduction = "umap", group.by = "clonostate",cols = c("#D1D0E4","#463179"),raster=FALSE)+
+  NoLegend()+
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        axis.line = element_blank())
+# FeaturePlot(scRNA_CAR_CD4,features = "clononumber",max.cutoff = 500)+ 
+#   theme(panel.border = element_rect(fill=NA,color= "black", size=1, linetype= "solid"))
+celltype_clonotype_clononumber_df$clonostate = ifelse(celltype_clonotype_clononumber_df$clononumber >= 10, ">=10",
+                                                      ifelse(celltype_clonotype_clononumber_df$clononumber >= 5,"5-9",
+                                                             ifelse(celltype_clonotype_clononumber_df$clononumber >= 2,"2-4","Unique")))
+scRNA_CAR_CD4@meta.data$cell = rownames(scRNA_CAR_CD4@meta.data)
+clononumber_df = celltype_clonotype_clononumber_df[,c(2,5)]
+clononumber_df[,2] = as.numeric(clononumber_df[,2])
+#scRNA_CAR_CD4@meta.data = merge(scRNA_CAR_CD4@meta.data,clononumber_df,by = "cell",all.x = T)
+scRNA_CAR_CD4@meta.data = inner_join(scRNA_CAR_CD4@meta.data,clononumber_df)
+clonostate_df = celltype_clonotype_clononumber_df[,c(2,6)]
+#scRNA_CAR_CD4@meta.data = merge(scRNA_CAR_CD4@meta.data,clonostate_df,by = "cell",all.x = T)
+scRNA_CAR_CD4@meta.data = inner_join(scRNA_CAR_CD4@meta.data,clonostate_df)
+rownames(scRNA_CAR_CD4@meta.data) = scRNA_CAR_CD4@meta.data$cell
+sub_10 = subset(scRNA_CAR_CD4, clonostate == "Unique")
+table(sub_10$orig.ident)
+DefaultAssay(scRNA_CAR_CD4) <- "RNA"
 list = read.csv("genelist.csv")
 cd_features <- list(list[,1])
-Inscore <- AddModuleScore(scRNA_csf_HC_BL,
+Inscore <- AddModuleScore(scRNA_CAR_CD4,
                           features = cd_features,
                           ctrl = 100,
                           name = "CD_Features")
 colnames(Inscore@meta.data)
-colnames(Inscore@meta.data)[93] <- 'Inflammatory_Score'
-VlnPlot(Inscore,features = 'Inflammatory_Score', 
-        pt.size = 0, adjust = 2,group.by = "orig.ident")
+colnames(Inscore@meta.data)[93] <- 'Exhaustion_Score'
+p = VlnPlot(Inscore,features = 'Exhaustion_Score', 
+        pt.size = 0, adjust = 2,group.by = "SampleType",
+        cols = c("#AB2A4F","#BC5572","#CD7F97","#DEABBA","#EFD5DD"))
+p
+data = p$data
+table(scRNA_CAR_CD4$SampleType2)
+table(scRNA_CAR_CD4$t_clonotype_id)
+scRNA_CAR_CD4@meta.data$clonolabel = ifelse(scRNA_CAR_CD4$SampleType2 != "Late",'Other Timepoints',
+                                        ifelse(scRNA_CAR_CD4$t_clonotype_id == "clonotype1" ,'Clonotype1',
+                                            ifelse(scRNA_CAR_CD4$t_clonotype_id == "clonotype2" ,'Clonotype2',
+                                                ifelse(scRNA_CAR_CD4$t_clonotype_id == "clonotype3" ,'Clonotype3',
+                                                    ifelse(scRNA_CAR_CD4$t_clonotype_id == "clonotype4" ,'Clonotype4','Late') )
+                                                      )))
+scRNA_CAR_CD4$clonolabel = factor(scRNA_CAR_CD4$clonolabel,
+                              levels = c("Late","Other Timepoints",
+                                         "Clonotype1","Clonotype2",
+                                         "Clonotype3","Clonotype4"))
+table(scRNA_CAR_CD4$clonolabel)
+col = c("#B2CFE5","#D2D1D2","#8A2A46","#D97351","#5384B6","#61549F")
+library(ggplot2)
+DimPlot(scRNA_CAR_CD4, reduction = "umap", group.by = "clonolabel",cols = col,pt.size = 1)+ NoLegend()
 
-meta = Inscore@meta.data[,c(88,93)]
-write.csv(meta, "Inflammatory_Score_csf_HC_BL.csv")
 
-
-
+## Myeloid_reclustering-----------------------------------------------------------------------------------------------------------------------------------------------
 scRNA_mono = subset(scRNA_all, label == "CD14+ monocytes"|label == "CD16+ monocytes"|
                                label == "Macrophages"|label == "pDCs"|label == "cDCs")
 pc.num = 1:30
@@ -1320,12 +1361,10 @@ new.cluster.ids <- c("CD14+ monocytes",
                      "Unknown",
                      "Unknown",
                      "Unknown")
-
 scRNA_mono@active.ident <- plyr::mapvalues(
   x = scRNA_mono@active.ident,
   from = current.cluster.ids,
   to = new.cluster.ids)
-
 scRNA_mono@meta.data$label = scRNA_mono@active.ident
 scRNA_mono = subset(scRNA_mono, label != "Unknown")
 DimPlot(scRNA_mono, reduction = "umap",label=T, repel = T)
@@ -1351,12 +1390,10 @@ DimPlot(scRNA_mono_HC_BL, reduction = "umap",label=T, repel = T, cols = col5,pt.
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank())+
   theme(panel.border = element_rect(fill=NA,color= "black", size=1, linetype= "solid"))
-
 sub_PBMC = subset(scRNA_mono_HC_BL, SampleOrig == "blood")
 sub_CSF = subset(scRNA_mono_HC_BL, SampleOrig == "csf")
 table(sub_PBMC$label)
 table(sub_CSF$label)
-
 Idents(scRNA_mono) = "seurat_clusters"
 current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,12,14,15,17,18,19,20)
 new.cluster.ids <- c("CD14+ monocytes",
@@ -1383,8 +1420,6 @@ scRNA_mono@active.ident <- plyr::mapvalues(
   to = new.cluster.ids)
 scRNA_mono@meta.data$label = scRNA_mono@active.ident
 DimPlot(scRNA_mono, reduction = "umap",label=T, repel = T)
-
-
 SampleOrig = scRNA_mono$SampleOrig
 SampleOrig_df = data.frame(cell = names(SampleOrig),type = SampleOrig,label = scRNA_mono$label)
 for(i in 1:nrow(SampleOrig_df)){
@@ -1396,7 +1431,6 @@ scRNA_mono@meta.data = inner_join(scRNA_mono@meta.data,SampleOrig_df)
 rownames(scRNA_mono@meta.data) = scRNA_mono@meta.data$cell
 DimPlot(scRNA_mono, group.by = "SampleClass")
 table(scRNA_mono$SampleClass)
-
 library(monocle)
 library(tidyverse)
 library(dplyr)
@@ -1425,10 +1459,8 @@ deg = deg[order(deg$qval, decreasing = F),]
 ordergene = rownames(deg)
 test = setOrderingFilter(test, ordergene)
 #ordergene = row.names(deg)[order(deg$qval)][1:2000]
-
 test=reduceDimension(test,method = "DDRTree",max_components = 2) 
 test=orderCells(test)
-
 library(COSG)
 library(BuenColors)
 library(circlize)
@@ -1440,16 +1472,6 @@ scRNA_mono$CellClass = ifelse(scRNA_mono$SampleClass == "blood CD14+ monocytes"|
                                   ifelse(scRNA_mono$SampleClass == "csf Macrophage-like","csf Macrophage-like","csf Microglia-like"))))
 table(scRNA_mono$CellClass)
 scRNA_mono$CellClass = factor(scRNA_mono$CellClass, levels = c("CD14+ monocytes","CD16+ monocytes","blood Macrophage-like","csf Macrophage-like","csf Microglia-like"))
-# Idents(scRNA_mono) = "CellClass"
-# marker_cosg <- cosg(
-#   subset(scRNA_mono),
-#   groups='all',
-#   assay='RNA',
-#   slot='data',
-#   mu=1,
-#   n_genes_user=20)
-# marker_cosg$names
-
 scRNA_mono$SampleClass = factor(scRNA_mono$SampleClass, levels = c("blood CD14+ monocytes","blood CD16+ monocytes","blood Macrophage-like",
                                                                    "csf CD14+ monocytes","csf CD16+ monocytes","csf Macrophage-like","csf Microglia-like"))
 Idents(scRNA_mono) = "SampleClass"
@@ -1463,19 +1485,6 @@ gene = c("LYZ","S100A9","S100A8","FCN1","VCAN","S100A12",
          "P2RY12","TREM2","APOE","APOC1","GPNMB")
 mat <- as.matrix(mat[gene, names(cluster_info)])
 mat = log2(mat + 1)
-# Heatmap(mat,
-#         cluster_rows = FALSE,
-#         cluster_columns = FALSE,
-#         show_column_names = FALSE,
-#         show_row_names = TRUE)
-
-# mark_gene <- c("CCR7","LEF1","CCR7","LEF1","GPR183","IL7R","CD8A","GNLY","PRF1","NKG7","GNLY","CD14","LYZ","CDKN1C","CD79A","MS4A1","CD19","CD79B","IGHA1","MZB1")
-# gene_pos <- which(rownames(mat) %in% mark_gene)
-
-# row_anno <-  rowAnnotation(mark_gene = anno_mark(at = gene_pos,
-#                                                  labels = mark_gene))
-# type_info = scRNA_mono$orig.ident
-# type_df = data.frame(cell = names(type_info),type = type_info)
 SampleClass = scRNA_mono$SampleClass
 SampleClass_df = data.frame(cell = names(SampleClass),SampleClass = SampleClass)
 CellClass = scRNA_mono$CellClass
@@ -1523,7 +1532,6 @@ Heatmap(mat,
         col = col_heatmap,
         column_title = NULL,
         use_raster = FALSE)
-
 scRNA_mg = subset(scRNA_csf, label == "Macrophages")
 scRNA_mg <- RunUMAP(scRNA_mg, reduction = "harmony", dims = 1:26)
 scRNA_mg <- FindNeighbors(scRNA_mg, reduction = "harmony", dims = 1:26)
@@ -1603,7 +1611,6 @@ a+ theme_bw() + theme(panel.grid.major = element_blank(),
         axis.ticks.x = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank())
-
 library(GSVA)
 library(tidyverse)
 library(ggplot2)
@@ -1631,6 +1638,7 @@ gsva_gobp = data.frame(Genesets = rownames(gsva.res), gsva.res, check.names = F)
 write.csv(gsva_gobp, "MG_gsva_WIKIPATHWAYS.csv", row.names = F)
 
 
+## CSOmap-------------------------------------------------------------------------------------------------------------------------------------------------------------
 library(data.table)
 table(scRNA_csf$orig.ident)
 table(scRNA_csf$label)
@@ -1831,6 +1839,3 @@ optimization <- function (affinityMat, initial_config = NULL, k = 3,
   }
   ydata
 }
-
-
-#CSOmap('test')

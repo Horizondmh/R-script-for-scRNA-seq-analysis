@@ -1,3 +1,4 @@
+## QC & AddClonotypeData----------------------------------------------------------------------------------------------------------------------------------------------
 rm(list = ls())
 Sys.setenv(R_MAX_NUM_DLLS=999)
 options(stringsAsFactors = F)
@@ -8,7 +9,6 @@ library(dplyr)
 library(DoubletFinder)
 dir1_1 = c('./data/matrix/C_NMO_1/')
 sample_name1 <- c('C_NMO_1')
-
 scRNAlist <- list()
 for(i in 1:N){
   counts <- Read10X(data.dir = dir1_1[i])
@@ -20,16 +20,14 @@ for(i in 1:N){
                              nCount_RNA< 40000 &
                              nFeature_RNA>= 200  &
                              log10GenesPerUMI > 0.7)
-  ## preprocessing
   scRNAlist[[i]] <- NormalizeData(scRNAlist[[i]])
   scRNAlist[[i]] <- ScaleData(scRNAlist[[i]], verbose = FALSE)
   scRNAlist[[i]] <- FindVariableFeatures(scRNAlist[[i]], verbose = FALSE)
   scRNAlist[[i]] <- RunPCA(scRNAlist[[i]], npcs = 30, verbose = FALSE)
   scRNAlist[[i]] <- RunUMAP(scRNAlist[[i]], reduction = "pca", dims = 1:30)
   scRNAlist[[i]] <- FindNeighbors(scRNAlist[[i]], reduction = "pca", dims = 1:30)
-  scRNAlist[[i]] <- FindClusters(scRNAlist[[i]], resolution = 0.5)
+  scRNAlist[[i]] <- FindClusters(scRNAlist[[i]], resolution = 0.8)
 }
-
 for(i in 1:N){
   table(scRNAlist[[i]]$orig.ident)
   Doubletrate = ncol(scRNAlist[[i]])*8*1e-6
@@ -38,20 +36,16 @@ for(i in 1:N){
   sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
   bcmvn <- find.pK(sweep.stats)
   mpK<-as.numeric(as.vector(bcmvn$pK[which.max(bcmvn$BCmetric)]))
-  ## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
   annotations <- scRNAlist[[i]]@meta.data$seurat_clusters
   homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- sample14@meta.data$ClusteringResults
   nExp_poi <- round(Doubletrate*nrow(scRNAlist[[i]]@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
   nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
-  ## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
   scRNAlist[[i]] <- doubletFinder_v3(scRNAlist[[i]], PCs = 1:30, pN = 0.25, pK = mpK, nExp = nExp_poi.adj, reuse.pANN = FALSE, sct = FALSE)
-  ## save results
   scRNAlist[[i]]$doubFind_res = scRNAlist[[i]]@meta.data %>% select(contains('DF.classifications'))
   scRNAlist[[i]]$doubFind_score = scRNAlist[[i]]@meta.data %>% select(contains('pANN'))
   scRNAlist[[i]] = subset(scRNAlist[[i]], doubFind_res == "Singlet")
   table(scRNAlist[[i]]$orig.ident)
 }
-
 scRNA_harmony <- merge(scRNAlist1,y = c(scRNAlist2))
 table(scRNA_harmony$orig.ident)
 scRNA_harmony <- NormalizeData(scRNA_harmony)
@@ -64,7 +58,6 @@ scRNA_harmony <- ScaleData(scRNA_harmony)
 scRNA_harmony <- RunPCA(scRNA_harmony, verbose=FALSE)
 library(harmony)
 system.time({scRNA_harmony <- RunHarmony(scRNA_harmony, group.by.vars = "orig.ident")})
-
 plot1 <- DimPlot(scRNA_harmony, reduction = "pca", group.by="orig.ident")
 plot2 <- ElbowPlot(scRNA_harmony, ndims=50, reduction="pca")
 plotc <- plot1+plot2
@@ -74,10 +67,11 @@ scRNA_harmony <- RunUMAP(scRNA_harmony, reduction = "harmony", dims = pc.num)
 #scRNA_harmony <- RunTSNE(scRNA_harmony, reduction = "harmony", dims = pc.num)
 scRNA_harmony <- FindNeighbors(scRNA_harmony, reduction = "harmony", dims = pc.num)
 scRNA_harmony <- FindClusters(scRNA_harmony, reduction = "harmony", resolution = 0.8)
-
 DimPlot(scRNA_harmony, reduction = "umap", label=T)
 #DimPlot(scRNA_harmony, reduction = "tsne", label=T)
 
+
+## Cell_Clustering-----------------------------------------------------------------------------------------------------------------------------------------------------
 pdf(file="markerBubble_1.pdf",width=30,height=11)
 cluster10Marker=c("CD3D","CD3E","CD4","CD8A","MKI67",
                   "CCR7","TCF7","LEF1","SELL","CCR6","NR4A1","NCR3","KLRB1","GPR183","IL7R","CD27",
@@ -96,7 +90,6 @@ cluster10Marker=c("LYZ","CD14","CD83","FCGR3A","C1QA","C1QB","C1QC","CSF1R","TRE
                   "CD1C","LILRA4","PF4","CD68","MARCO","FUT4","ITGAM","MME","CXCR2","SELL")
 DotPlot(object = scRNA_all, features = cluster10Marker,col.min = -1)
 dev.off()
-
 current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27)
 new.cluster.ids <- c("CD4+ T cells",
                      "CD8+ T cells",
@@ -126,19 +119,16 @@ new.cluster.ids <- c("CD4+ T cells",
                      "Unknown",
                      "Macrophages",
                      "CD14+ monocytes")
-
 scRNA_all@active.ident <- plyr::mapvalues(
   x = scRNA_all@active.ident,
   from = current.cluster.ids,
   to = new.cluster.ids)
-
 scRNA_all@meta.data$label = scRNA_all@active.ident
 table(scRNA_all$orig.ident)
 scRNA_all = subset(scRNA_all, label != "Unknown")
 scRNA_all <- RunUMAP(scRNA_all, reduction = "harmony", dims = 1:30, min.dist = 0.3, n.neighbors = 30L)
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T)
 DimPlot(scRNA_all, reduction = "umap",label=T, repel = T)
-
 table(scRNA_all$orig.ident)
 scRNA_all@active.ident = factor(scRNA_all@active.ident, 
                                       levels = c("CD4+ T cells","CD8+ T cells","NK cells","Proliferating cells","B cells","Plasma cells",
@@ -161,7 +151,6 @@ DotPlot(object = scRNA_all, features = cluster10Marker)+
   theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+
   scale_color_viridis()
 dev.off()
-
 library(viridis)
 library(ggplot2)
 pdf(file="markerBubble_PBMC.pdf",width=9,height=4)
@@ -172,7 +161,6 @@ DotPlot(object = scRNA_blood, features = cluster10Marker)+
   theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+
   scale_color_viridis()
 dev.off()
-
 DefaultAssay(scRNA_csf) <- "RNA"
 list = read.csv("genelist.csv")
 cd_features <- list(list[,1])
@@ -188,6 +176,8 @@ VlnPlot(Inscore,features = 'Inflammatory_Score',
 meta = Inscore@meta.data[,c(48,50)]
 write.csv(meta, "Inflammatory_Score_csf.csv")
 
+
+## Myeloids_reclustering-----------------------------------------------------------------------------------------------------------------------------------------------
 scRNA_mono = subset(scRNA_all, label == "CD14+ monocytes"|label == "CD16+ monocytes"|
                                label == "Macrophages"|label == "pDCs"|label == "cDCs")
 scRNA_mono <- RunUMAP(scRNA_mono, reduction = "harmony", dims = 1:20, min.dist = 0.3, n.neighbors = 30L)
@@ -222,7 +212,6 @@ scRNA_mono@active.ident <- plyr::mapvalues(
   x = scRNA_mono@active.ident,
   from = current.cluster.ids,
   to = new.cluster.ids)
-
 scRNA_mono@meta.data$label = scRNA_mono@active.ident
 scRNA_mono = subset(scRNA_mono, label != "Unknown")
 DimPlot(scRNA_mono, reduction = "umap",label=T, repel = T)
@@ -244,7 +233,6 @@ sub_PBMC = subset(scRNA_mono, SampleOrig == "blood")
 sub_CSF = subset(scRNA_mono, SampleOrig == "csf")
 table(sub_PBMC$label)
 table(sub_CSF$label)
-
 library(topGO)
 library(GO.db)
 library(biomaRt)
@@ -252,7 +240,6 @@ library(Rgraphviz)
 library(GOplot)
 library(org.Hs.eg.db)
 library(clusterProfiler)
-
 scRNA_mg = subset(scRNA_mono, label == "Macrophages")
 scRNA_mg = subset(scRNA_mg, SampleOrig == "csf")
 table(scRNA_mg$orig.ident)
@@ -270,7 +257,6 @@ ID = bitr(sce.markers$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.
 colnames(ID) = c("gene","ENTREZID")
 data = inner_join(ID,sce.markers)
 geneList = data$ENTREZID
-
 BP <- enrichGO(gene = geneList,  
                keyType = "ENTREZID",  
                OrgDb=org.Hs.eg.db,  
@@ -283,18 +269,14 @@ BP <- enrichGO(gene = geneList,
                readable = TRUE) 
 df <- BP@result
 df_diff = df[df$qvalue < 0.05,]
-
 go=data.frame(Category = rep("BP",587),ID = df_diff$ID,Term = df_diff$Description, Genes = gsub("/", ", ", df_diff$geneID), adj_pval = df_diff$p.adjust)
-
 data$logFC = ifelse(data$cluster == "HC",-data$avg_log2FC,data$avg_log2FC)
 data2 = data[,c(1,9)]
 colnames(data2) = c("ID","logFC")
 circ = circle_dat(go,data2)
 write.csv(circ,"circ.csv")
-
 circ_new = read.csv("circ_new.csv")
 GOBubble(circ_new, labels = 1,table.legend =F)
-
 library(GSVA)
 library(tidyverse)
 library(ggplot2)

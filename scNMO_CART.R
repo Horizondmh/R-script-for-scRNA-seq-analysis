@@ -1,10 +1,11 @@
+## QC & AddClonotypeData----------------------------------------------------------------------------------------------------------------------------------------------
 rm(list = ls())
 Sys.setenv(R_MAX_NUM_DLLS=999)
 gc()
-
 library(Seurat)
 library(tidyselect)
 library(dplyr)
+library(DoubletFinder)
 
 add_clonotype <- function(tcr_prefix, seurat_obj, type="t"){
   tcr <- read.csv(paste(tcr_prefix,"filtered_contig_annotations.csv", sep=""))
